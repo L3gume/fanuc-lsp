@@ -1,0 +1,20 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- MinVer derives the version from git tags of the form v{major}.{minor}.{patch} -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+  </PropertyGroup>
+
+  <!-- No debug symbols in Release builds, so a published single-file build
+       emits just the .exe (no loose .pdb files). Debug builds keep normal
+       portable .pdb files for local debugging. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,426 @@
+     PROGRAM DOUT_EX                      -- Define the program name
+     %ALPHABETIZE                         -- CReate the variables in alphabetical order
+     %NOPAUSE = TPENABLE                  -- Do not pause the program if TP is ENABLED.
+                                          -- during execution.
+     %COMMENT = 'PORT/CH DOUT_EX'
+     %CMOSVARS                            -- Make sure variables are stored in CMOS
+     %INCLUDE KLIOTYPS
+     ----------------------------------------------------------------------------
+     ---- Section 2: Constant and Variable Declarations
+     ----------------------------------------------------------------------------
+     CONST
+     -- Condition Handler Numbers
+          CONT_CH = 2                       -- Continue execution condition
+          EQIP_FAIL = 3                     -- Equipment Failure Condition
+          RESTART = 6                       -- Restart condition Handler
+          SERV_DONE = 4                     -- Servicing Done condition
+          UNINIT_CH = 10                    -- Monitor for uninit error
+          WARMED_UP = 5                     -- Event to notify eqip is ready
+     -- Process DOUT numbers ( 1 thru 6 are complementary DOUT )
+     --                         ( 3 and 4 are simulated DOUT )
+          EQIP_READY = 1                    -- Equipment Ready
+          EQIP_NOT_RD= 2                    -- Equipment Not Ready
+          EQIP_ERROR = 3                    -- Equipment Failed during process
+          EQIP_FIXED = 4                    -- Equipment Fixed after failure
+          EQIP_ON = 5                       -- Turn Eqip-1 ON DOUT
+          EQIP_OFF = 6                      -- Turn Eqip-1 OFF DOUT
+          NODE_PULSE = 7                    -- Node Pulsing DOUT
+          FINISH       =8                   -- Path Finishing signal DOUT
+     -- Process Constants
+          SUCCESS = 0                       -- Successful Operation Status
+          UNASIGNED = 13007                 -- Unassigned Port Deletion Error
+     VAR
+          cont_timer,
+          last_node, node_ind,
+          status                :INTEGER    -- Status from builtin calls
+          prg_abrt              :BOOLEAN    -- Set when the program is aborted
+          pth1                  :PATH       -- Process Path
+          stop_pos              :XYZWPREXT  -- Process Stop Position
+          perch_pos             :XYZWPR     -- Perch Position
+     tmp_xyz           :XYZWPR            -- XYZWPR variable for temporary use
+     indx              :INTEGER           -- Used a FOR loop counter
+     ports_ready       :BOOLEAN           -- Check if ports assigned
+     cmt_str           :STRING[10]        -- Comment String
+---------------------------------------------------------------------------
+---- Section 3: Routine Declaration
+---------------------------------------------------------------------------
+---------------------------------------------------------------------------
+---- Section 3-A: TP_CLS Declaration
+----                   This routine is from ROUT_EX.kl and will
+----                   clear the TP USER menu screen and force
+----                   it to be visible.
+---------------------------------------------------------------------------
+ROUTINE tp_cls FROM rout_ex               -- ROUT_EX must also be loaded.
+---------------------------------------------------------------------------
+---- Section 3-B: port_init Declaration
+----                   This routine assigns a value to ports_ready, which
+----                   allows the ports to be initialized. It resets the
+----                   controller so that program execution may be continued
+----                   automatically though the CONT_CH condition handler.
+---------------------------------------------------------------------------
+ROUTINE init_port
+VAR
+            reset_ok: BOOLEAN
+BEGIN
+ports_ready = FALSE                 -- Set false so ports will be initialized
+DELAY 500;
+RESET(reset_ok)                     -- Reset the controller
+IF (NOT reset_ok) THEN
+       WRITE('Reset Failed', CR)
+     ENDIF
+cont_timer = 0                      -- Set a timer to continue the process
+ENABLE CONDITION[CONT_CH]           -- Enabled the CONT_CH which continues
+                                    -- program execution
+END init_port
+-----------------------------------------------------------------------------
+---- Section 3-C: SET_MODE Declaration
+----                   Sets up the mode of IO's. Depending on the passed
+----                   parameter the IO ports will be set to REVERSE
+      ----                    and/or COMPLEMENTARY mode. When the ports are set
+      ----                    to REVERSE mode, the TRUE condition is represented by
+      ----                    a FALSE signal. When COMPLEMENTARY mode is selected
+      ----                    for a port (odd number port), the port n and n+1 are
+      ----                    complementary signal of each other.
+      -----------------------------------------------------------------------------
+      ROUTINE set_mode(port_type:      INTEGER;
+                        port_no:       INTEGER;
+                        reverse:       BOOLEAN;
+                        complmnt:      BOOLEAN)
+      VAR
+            mode:             INTEGER
+      BEGIN -- set_mode
+      IF reverse THEN
+            mode = 1                             -- Set the reverse mode
+      ELSE
+            mode = 0
+      ENDIF
+      IF complmnt THEN
+            mode = mode OR 2                     -- Set complementary mode
+      ENDIF
+      SET_PORT_MOD(port_type, port_no, mode, status)
+      END set_mode
+      ---------------------------------------------------------------------------
+      ---- Section 3-D: SETUP_PORTS Declaration
+      ----            This section assumes that you do not have an AB or GENIUS I/O
+      ----            or any other external I/O board. Therefore, any previous port
+      ----            assignments are no longer needed for this application, and
+      ----            can be deleted.
+      ---------------------------------------------------------------------------
+      ROUTINE setup_ports
+      VAR
+            port_n : INTEGER
+      BEGIN
+      -- Delete DIGITAL OUTPUT PORTS 1 thru 48
+      FOR port_n = 0 to 5 DO
+            -- Indexing of 0 to 5 may not be obvious, But look into the DIGITAL
+            -- OUT Configuration screen in TP, you will see the 8 DIGITAL OUTPUT
+            -- ports are grouped together in configuration.
+            SET_PORT_ASG(IO_DOUT, port_n*8+1, 0, 0, 0, 0, 0, status)
+            IF (status <> SUCCESS) AND (status <> UNASIGNED) THEN
+             -- Verify that deletion by SET_PORT_ASG was successful
+             WRITE ('SET_PORT_ASG built-in for DOUT (deletion) failed',CR)
+WRITE ('Status = ',status,CR)
+ENDIF
+ENDFOR
+-- Assign the DIGITAL PORTS 1 THRU 48 as memory images.
+FOR port_n = 0 TO 5 DO
+SET_PORT_ASG(IO_DOUT, port_n*8+1, 0, 0, io_mem_boo, port_n*8+1, 8, status)
+IF (status <> 0 ) THEN       -- Verify that SET_PORT_ASG was successful
+WRITE ('SET_PORT_ASG built-in for DOUT (assignment) failed',CR)
+WRITE ('Status = ',status,CR)
+ENDIF
+ENDFOR
+-- Suppose equipment-1 is turned ON by the DOUT[1] = TRUE signal and
+-- turned OFF by the DOUT[2] = TRUE signal. To avoid both signals being
+-- TRUE or FALSE at the same time, set DOUT[1] to be a complement.
+-- Once the DOUT[1] is set in complementary mode, the DOUT[1] and
+-- DOUT[2] will always show the opposite signal of each other.
+-- Thus avoiding the confusion of turning the equipment OFF and ON
+-- at the same time.
+-- Set port-1, port-3 and port-5 to COMPLEMENTARY mode.
+FOR port_n = 1 to 6 DO
+SET_MODE(io_dout, port_n, TRUE, TRUE)
+IF (status <> SUCCESS) THEN
+WRITE ('SET_PORT_MODE Failed on port ',1,CR)
+WRITE ('With Status = ',status,CR)
+ENDIF
+ENDFOR
+-- Set appropriate comments for the ports.
+SET_PORT_CMT(IO_DOUT, EQIP_READY, 'Equip-READY ',status)
+IF (status <> 0 ) THEN         -- Verify SET_PORT_CMT was successful
+WRITE ('SET_PORT_CMT built-in failed',CR)
+WRITE ('Status = ',status,CR)
+ENDIF
+SET_PORT_CMT(IO_DOUT, EQIP_NOT_RD, 'E - NOT READY',status)
+IF (status <> 0 ) THEN         -- Verify SET_PORT_CMT was successful
+WRITE ('SET_PORT_CMT built-in failed',CR)
+WRITE ('Status = ',status,CR)
+ENDIF
+SET_PORT_CMT(IO_DOUT, EQIP_ERROR, 'Equip- ERROR',status)
+IF (status <> 0 ) THEN         -- Verify SET_PORT_CMT was successful
+WRITE ('SET_PORT_CMT built-in failed',CR)
+WRITE ('Status = ',status,CR)
+ENDIF
+SET_PORT_CMT(IO_DOUT, EQIP_FIXED, 'Equip- FIXED',status)
+      IF (status <> 0 ) THEN               -- Verify SET_PORT_CMT was successful
+            WRITE ('SET_PORT_CMT built-in failed',CR)
+            WRITE ('Status = ',status,CR)
+      ENDIF
+      SET_PORT_CMT(IO_DOUT, EQIP_ON, 'Equip- ON',status)
+      IF (status <> 0 ) THEN               -- Verify SET_PORT_CMT was successful
+            WRITE ('SET_PORT_CMT built-in failed',CR)
+            WRITE ('Status = ',status,CR)
+      ENDIF
+      SET_PORT_CMT(IO_DOUT, EQIP_OFF, 'Equip- OFF',status)
+      IF (status <> 0 ) THEN               -- Verify SET_PORT_CMT was successful
+            WRITE ('SET_PORT_CMT built-in failed',CR)
+            WRITE ('Status = ',status,CR)
+      ENDIF
+      SET_PORT_CMT(IO_DOUT, NODE_PULSE, 'Pulse @ node',status)
+      IF (status <> 0 ) THEN               -- Verify SET_PORT_CMT was successful
+            WRITE ('SET_PORT_CMT built-in failed',CR)
+            WRITE ('Status = ',status,CR)
+      ENDIF
+      SET_PORT_CMT(IO_DOUT, FINISH, 'Finish PATH',status)
+      IF (status <> 0 ) THEN               -- Verify SET_PORT_CMT was successful
+            WRITE ('SET_PORT_CMT built-in failed',CR)
+            WRITE ('Status = ',status,CR)
+      ENDIF
+      TP_CLS -- clear the teach pendant USER screen
+      WRITE ('PORT SETUP IS COMPLETE',CR)
+      WRITE ('AT THIS POINT YOU NEED TO COLD START',CR)
+      WRITE ('Configuration changes of PORTs will not',CR)
+      WRITE ('take effect until after a COLD START.',CR,CR)
+      WRITE ('Once the controller is ready after',CR)
+      WRITE ('COLD START, re-load this program',CR)
+      WRITE ('rerun.',CR)
+      ports_ready = TRUE      -- Set the ports_ready variable so re-execution of
+                              -- this routine, setup_ports, is not performed.
+      -- Aborting program to allow for the cold start.
+      ABORT
+      END setup_ports
+      ----------------------------------------------------------------------------
+      ---- Section 3-E: SERVICE_RTN interrupt routine Declaration
+      ----                This routine waits until the equipment has been
+      ----                serviced and then moves the robot back to where
+----                   it was before servicing. It then sets the DOUT
+----                   to notify that the equipment is ready.
+----------------------------------------------------------------------------
+ROUTINE service_rtn
+BEGIN
+TP_CLS
+-- store the current position, where the process is stopped due to failure
+-- so after resuming the process can be started from this point.
+stop_pos = CURPOS(0,0)
+-- move the robot to the perch position so the equipment
+-- can be worked on safely.
+SET_POS_REG(1, perch_pos, status) ---- Put perch_pos in PR[1]
+move_to_pr -- Call TP program to move to PR[1]
+WRITE (chr(139),' PLEASE READ ',chr(143),CR)      --Display in reverse video
+WRITE ('Equipment - 1 failed during',CR)
+WRITE ('processing. Motions have been stopped.',CR)
+WRITE ('Please Fix the equipment then',CR)
+WRITE ('SET DOUT[',EQIP_FIXED,'] = TRUE ',CR)
+        --Display the following message in reverse video
+WRITE (chr(139), 'IMPORTANT: Once the DOUT is set, current',CR)
+WRITE ('STOPPED motion will be RESUMED',chr(143),CR)
+WAIT FOR DOUT[EQIP_FIXED] -- wait until equipment has been fixed
+-- Move to the point where the process was stopped
+SET_EPOS_REG(1, stop_pos, status)
+move_to_pr -- Call TP program to move to PR[1]
+-- Enable the SERVICE-DONE condition handler to resume the process.
+ENABLE CONDITION[SERV_DONE]
+-- Wait a sufficient time to allow equipment to warm up and get ready for
+-- processing after the fix is completed.
+WRITE ('Continuing the process.....',CR)
+DELAY 2000
+--Signal that the equipment is now ready.
+DOUT[EQIP_READY] = TRUE
+-- Force the teach pendant back to the IO screen
+FORCE_SPMENU(tp_panel, SPI_TPDIGIO, 1)
+END service_rtn
+----------------------------------------------------------------------------
+---- Section 3-F: Routines frst_nod, mid_nods and end_nod are TP
+---- routines for doing moves with Time Before clauses
+----------------------------------------------------------------------------
+ROUTINE frst_nod FROM frst_nod  -- frst_nod must also be loaded.
+      -- 1:L PR[1] 100mm/sec CNT100 TB   0.00sec,DO[1:NODE_PULSE]=PULSE,1.0sec ;
+      -- 2:L PR[1] 100mm/sec CNT100 TB    0.00sec,DO[2:EQUIP_ON]=PULSE,2.0sec ;
+      ROUTINE mid_nods FROM mid_nods     -- mid_nods must also be loaded.
+      -- 1:L P[1] 100mm/sec CNT100 TB
+      ROUTINE end_nod FROM end_nod
+      -- 0.00sec,DO[1:NODE_PULSE]=PULSE,1.0sec ;
+      -- 1:L P[1] 100mm/sec FINE TB      -- end_nod must also be loaded.
+      -- 2:L P[1] 100mm/sec FINE TB
+      -- .20sec,DO[3:FINISH]=ON ;
+      -- 0.00sec,DO[1:NODE_PULSE]=PULSE,1.0sec ;
+      -----------------------------------------------------------------------------
+      ---- Section 4: Main Program
+      -----------------------------------------------------------------------------
+      BEGIN -- DOUT_EX
+      -----------------------------------------------------------------------------
+      ---- Section 4-A: Global Condition Handler Declaration
+      -----------------------------------------------------------------------------
+      CONDITION[UNINIT_CH]:
+      WHEN ERROR[12311] DO               -- Trap UNINITIALIZATION error
+      NOMESSAGE                          -- Supress the error message
+      UNPAUSE                            -- UNPAUSE
+      init_port                          -- Allow ports to be initialized.
+      ENDCONDITION
+      ENABLE CONDITION[UNINIT_CH]
+      CONNECT TIMER to cont_timer
+      CONDITION [CONT_CH]:
+      WHEN cont_timer > 1000 DO
+      CONTINUE
+      ENDCONDITION
+      -----------------------------------------------------------------------------
+      ---- Section 4-B: Verify PATH variable, pth1, has been taught.
+      -----------------------------------------------------------------------------
+      tp_cls                        -- Routine Call; Clears the TP USER menu and
+                                    -- forces the TP USER menu to be visible.
+      -- Check the number of nodes in the path
+      IF PATH_LEN(pth1) = 0 THEN                -- Path is empty (no nodes)
+      WRITE ('You need to teach the path.',CR) -- Display instructions
+      WRITE ('before executing this program.',CR)
+      WRITE ('Teach the PATH variable pth1', CR, 'and restart the program',CR)
+      WRITE ('PROGRAM ABORTED',CR)
+      ABORT                              -- ABORT the task. do not continue
+                                         -- There are no nodes to move to
+                 ENDIF
+                 -- Set Perch Position
+                 -- This position is used in the service_rtn routine
+                 IF UNINIT(perch_pos) THEN
+                      WRITE ('PERCH POSITION is not recorded.',cr)
+                      WRITE ('RELEASing Motion Control to TP.',cr)
+                      WRITE ('Please Move robot to desired Perch Pos',cr)
+                      -- Wait until the DEADMAN switch is HELD and
+                      -- TP is TURNED ON to move robot from TP.
+                      WHILE ((TPIN[248] = ON) AND (TPIN[247] = ON)) DO
+                          WRITE TPPROMPT(CHR(128),CHR(137),'Hold Down the DEAD-MAN switch')
+                          DELAY 500
+                      ENDWHILE
+                      -- Release motion control from the KAREL program to the
+                      -- TP control. Robot can be moved to desired Perch
+                      -- position with out disturbing the flow of this KAREL task.
+                      RELEASE
+                      WHILE (TPIN[249] = OFF ) DO
+                          WRITE TPPROMPT(CHR(128),CHR(137),'Turn the TP ON')
+                          DELAY 1000
+                      ENDWHILE
+                      WRITE ('ROBOT is ready to move from TP',cr)
+                      WRITE ('After moving ROBOT to PERCH position ',cr)
+                      WRITE ('Turn OFF the TP then RELEASE DEADMAN ',cr)
+                      WHILE (TPIN[249] = ON ) DO
+                          WRITE TPPROMPT(CHR(128),CHR(137),'Turn OFF TP, after MOVE is done')
+                          DELAY 10000
+                      ENDWHILE
+                 -- KAREL program execution will not continue passed ATTACH
+                      -- statement until the TP is turned OFF.
+                      -- Wait until the TP is TURNED OFF after move from TP is completed.
+                      WHILE (TPIN[249] = ON ) DO
+                          DELAY 2000
+                      ENDWHILE
+                     -- At this point the robot is positioned to the desired
+                      -- Perch position. Get the motion
+                      -- control back from TP and record the perch position.
+                      ATTACH
+                      perch_pos = CURPOS(0,0,1)
+                 ENDIF
+                 ----------------------------------------------------------------------------
+                 ----Section 4-C: Set up Ports and Declare Process dependant condition
+                 -- handler
+                 ----------------------------------------------------------------------------
+                 -- Port assignments need to be assigned only once and take effect
+                 -- after the controller is COLD STARTED.
+                 -- The ports_ready variable is used to determine if the ports have
+                 -- already been assigned by this program.
+                 -- Therefore only the first execution of this program will assign the ports
+                 IF NOT(ports_ready) THEN
+                      setup_ports
+                 ENDIF
+                 -- Define a condition handler to trap equipment failure.
+                 -- If equipment fails during the process, then the DOUT[EQIP_ERROR] is
+                 -- set to TRUE. Which will stop the motion and require the equipment to be
+                 -- fixed before motion can be resumed.
+                 CONDITION[EQIP_FAIL]:
+                     WHEN DOUT[EQIP_ERROR] DO
+                        STOP
+                        DOUT[EQIP_FIXED] = FALSE
+                        DOUT[EQIP_READY] = FALSE
+                        ENABLE CONDITION[RESTART]
+                        service_rtn
+                 ENDCONDITION
+                 ENABLE CONDITION[EQIP_FAIL]
+                 -- Define a condition handler to monitor the servicing process.
+                 -- Once Servicing/Fixing of equipment is complete, wait for the equipment
+                 -- to be in READY mode. When the equipment is READY, signal an event
+                 -- which will restart the process where it left off. The SERV_DONE
+                 -- condition handler is ENABLED from the SERVICE_RTN interrupt routine.
+                 CONDITION[SERV_DONE]:
+                      WHEN DOUT[EQIP_READY] DO
+                        SIGNAL EVENT[WARMED_UP]
+                        DOUT[EQIP_ERROR] = FALSE
+                 ENDCONDITION
+                 -- Define a condition handler to monitor when the warm up is complete, then
+                 -- resume the stopped motion and continue the process. Also re-enable
+                 -- the EQIP_FAIL condition handler to continue monitoring for equipment
+                 -- failure.
+                 CONDITION[RESTART]:
+                     WHEN EVENT[WARMED_UP] DO
+                        RESUME
+                        ENABLE CONDITION[EQIP_FAIL]
+                 ENDCONDITION
+                 ----------------------------------------------------------------------------
+                 ---- Section 4-D: Do process manipulation
+                 ----------------------------------------------------------------------------
+                 -- Using the PATH_LEN built-in find out the last node of the path
+                 last_node = PATH_LEN(pth1)
+                 -- Setting EQIP_ERROR/EQIP_FIXED number ports to be simulated.
+                 -- This setup does not require cold start, can change the port to be
+                 -- simulated on the fly.
+                 SET_PORT_SIM(io_dout, NODE_PULSE, 1, status)
+                 IF (status <> SUCCESS) THEN
+                     WRITE ('SET_PORT_SIM Failed on port ',indx,CR)
+                     WRITE ('With Status = ',status,CR)
+                 ENDIF
+                 SET_PORT_SIM(io_dout, FINISH, 1, status)
+                 IF (status <> SUCCESS) THEN
+                     WRITE ('SET_PORT_SIM Failed on port ',indx,CR)
+                     WRITE ('With Status = ',status,CR)
+                 ENDIF
+                 WRITE (' NOW YOU WILL SEE THE DOUT[',NODE_PULSE,'] PULSE',CR)
+                 WRITE (' as the robot moves through every node.',CR,CR)
+                 WRITE (' To simulate EQUIPMENT failure, change ',CR)
+                 WRITE (' DOUT[',EQIP_ERROR,'] = TRUE. ',CR)
+                 WRITE (' Press ''ENTER'' to Continue',CR)
+                 READ(CR)
+                 -- Change the TP display to the DI/O Screen
+                 FORCE_SPMENU(tp_panel, SPI_TPDIGIO, 1)
+                 -- Moving along path when equipment is ready.
+                 -- Need to turn on equipment-1 for 1/2 second when robot position
+                 -- is at 1st node. Pulse the DOUT[NODE_PULSE] for every node
+                 -- Turn on the DOUT[FINISH] about 200 ms before the last node.
+                 IF DOUT[EQIP_READY] THEN
+                     tmp_xyz = pth1[1] -- Convert path node to XYZWPR
+                     SET_POS_REG(1, tmp_xyz, status) -- Put position in PR[1]
+                     frst_nod -- Call TP program to do move
+                     FOR node_ind = 2 TO (last_node - 1) DO
+                        tmp_xyz = pth1[node_ind]
+                        SET_POS_REG(1, tmp_xyz, status)
+                        mid_nods
+                     ENDFOR
+                     tmp_xyz = pth1[last_node]
+                     SET_POS_REG(1, tmp_xyz, status)
+                     end_nod
+                     ELSE
+                     FORCE_SPMENU(TP_PANEL,SPI_TPUSER,1)
+         WRITE (' Equipment is not READY',CR)
+         WRITE (' Set equipment to READY MODE',CR)
+         WRITE (' before executing this program.',CR)
+         WRITE (' SET DOUT[',EQIP_READY,'] = TRUE ',CR)
+         ABORT
+      ENDIF
+      WRITE TPFUNC (CHR(128),CHR(137)) -- Home Cursor and Clear to End-of-line
+                                                                         -- This will remove the ABORT displayed
+                                                                         -- above F1.
+      END DOUT_EX

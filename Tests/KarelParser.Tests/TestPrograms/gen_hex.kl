@@ -1,0 +1,122 @@
+      PROGRAM gen_hex
+      %COMMENT = 'HEXAGON'
+      ------------------------------------------------------------------------------
+      ---- Section 2: Constant and Variable Declaration
+      ------------------------------------------------------------------------------
+      CONST
+      L_HEX_SIDE = 300                      -- Length of one side of the hexagon
+      NUM_AXES = 6                          -- Number of robot axes
+      VAR
+      p_cntr           : JOINTPOS6 -- Center of the hexagon
+      p_xyzwpr         : ARRAY[NUM_AXES] OF XYZWPR
+                       -- Six vertices of the hexagon
+      tmp_xyz          :XYZWPR
+      clock,
+      t_start,
+      t_end,
+      t_total          : INTEGER
+      status,
+      p_indx           : INTEGER
+------------------------------------------------------------------------------
+---- Section 3: Routine Declaration
+------------------------------------------------------------------------------
+----------------------------------------------------------------------------
+---- Section 3-A: Routines move_to_pr and movl_to_pr are TP
+---- routines for doing moves
+----------------------------------------------------------------------------
+ROUTINE move_to_pr FROM move_to_pr   -- move_to_pr must also be loaded.
+-- 1:J PR[1] 100% FINE ;
+ROUTINE movl_to_pr FROM movl_to_pr   -- movl_to_pr must also be loaded.
+-- 1:L PR[1] 1000mm/sec FINE ;
+------------------------------------------------------------------------------
+---- Section 3-B: R_HEX_CENTER Declaration
+----                   Calculates the hexagon points based on distance
+----                   between point 1 and 4 of the hexagon.
+------------------------------------------------------------------------------
+ROUTINE r_calc_hex
+VAR
+p1_to_pcntr : REAL -- Distance from the center of the hex to point 1
+vertice  : INTEGER -- the index used specify each vertice of hexagon
+BEGIN
+p1_to_pcntr = (L_HEX_SIDE / 2) + (L_HEX_SIDE * COS(60))
+p_xyzwpr[1] = p_cntr   -- p_cntr was calculated in r_hex_center
+p_xyzwpr[1].y = p_xyzwpr[1].y - p1_to_pcntr --set the first vertice of hex
+FOR vertice = 2 TO NUM_AXES DO -- start at 2 since 1 is already set
+      p_xyzwpr[vertice] = p_xyzwpr[1] -- Intialize all vertices
+ENDFOR
+-- Calculating individual components for each vertice of the hexagon
+p_xyzwpr[2].x = p_xyzwpr[1].x + (L_HEX_SIDE * SIN(60))
+p_xyzwpr[2].y = p_xyzwpr[1].y + (L_HEX_SIDE * COS(60))
+p_xyzwpr[3].x = p_xyzwpr[1].x + (L_HEX_SIDE * SIN(60))
+p_xyzwpr[3].y = p_xyzwpr[1].y + (L_HEX_SIDE + (L_HEX_SIDE * COS(60)))
+   p_xyzwpr[4].y = p_xyzwpr[1].y + (L_HEX_SIDE + (2 * (L_HEX_SIDE * COS(60))))
+   p_xyzwpr[5].x = p_xyzwpr[1].x - (L_HEX_SIDE * SIN(60))
+   p_xyzwpr[5].y = p_xyzwpr[3].y
+   p_xyzwpr[6].x = p_xyzwpr[1].x - (L_HEX_SIDE * SIN(60))
+   p_xyzwpr[6].y = p_xyzwpr[2].y
+END r_calc_hex
+                 -----------------------------------------------------------------------------
+                 ---- Section 3-C: R_HEX_CENTER Declaration
+      ----                  Positions the face plate perpendicular
+      ----                  to the xy world coordinate plane.
+      -----------------------------------------------------------------------------
+      ROUTINE r_hex_center
+      VAR
+      status, indx : INTEGER
+      p_cntr_arry : ARRAY[NUM_AXES] OF REAL
+      BEGIN
+      -- Initalize the center position array to zero
+      FOR indx = 1 TO NUM_AXES DO
+             p_cntr_arry[indx] = 0
+      ENDFOR
+      -- Set JOINT 3 and 5 to -45 and 45 degrees
+      p_cntr_arry[3] = -45
+      p_cntr_arry[5] = 45 -- Convert the REAL array to a joint position,
+                              -- p_cntr
+      CNV_REL_JPOS(p_cntr_arry, p_cntr, status)
+      SET_JPOS_REG(1, p_cntr, status) -- Put p_cntr in PR[1]
+      move_to_pr -- Call TP program to move to PR[1]
+      END r_hex_center
+      -----------------------------------------------------------------------------
+      ---- Section 4: Main Program
+      -----------------------------------------------------------------------------
+      BEGIN --- GEN_HEX
+      -----------------------------------------------------------------------------
+      ---- Section 4-A: Connect timer, set uframe, call routines
+      -----------------------------------------------------------------------------
+      clock = 0                     -- Initialize clock value to zero
+      CONNECT TIMER TO clock        -- Connect the timer
+      WRITE ('Moving to the center of the HEXAGON',CR) -- update user of process
+      r_hex_center                  -- position the face plate of robot.
+      WRITE ('Calculating the sides of HEXAGON',CR) -- update user
+      r_calc_hex                    -- Calculate the hexagon points
+      -----------------------------------------------------------------------------
+      ---- Section 4-B: Move on sides of hexagon
+      -----------------------------------------------------------------------------
+      WRITE ('Moving along the sides of the Hexagon',CR) -- Update user
+      t_start = clock               -- Record the time before motion begins
+      FOR p_indx = 1 TO 6 DO
+       -- Verify that the position is reachable
+       CHECK_EPOS ((p_xyzwpr[p_indx]), $UFRAME, $UTOOL, status)
+IF (status <> 0) THEN
+      WRITE ('Unable to move to p_xyzwpr[', p_indx,']',CR);
+ELSE
+      SET_POS_REG(1, p_xyzwpr[p_index], status)
+      movl_to_pr                -- Call TP program to move to PR[1]
+                                -- Move to each vertex of hexagon
+ENDIF
+ENDFOR
+SET_POS_REG(1, p_xyzwpr[1], status)
+movl_to_pr              -- Call TP program to move to PR[1]
+                        -- Move back to first vertex of hexagon
+tmp_xyz = p_cntr
+SET_POS_REG(1, tmp_xyz, status)
+movl_to_pr                      -- Move TCP in a straight
+                                -- line to the center position
+t_end = clock                   -- Record ending time
+WRITE('Total motion time = ',t_end-t_start,CR) --Display the total time for
+                                                       -- motion.
+                                                       -- NOTE that the total was
+                                                       -- computed in the WRITE
+                                                       -- statement.
+END GEN_HEX

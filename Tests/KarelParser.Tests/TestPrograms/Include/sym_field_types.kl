@@ -1,0 +1,5 @@
+TYPE
+pose = STRUCTURE
+x : REAL
+y : REAL
+ENDSTRUCTURE

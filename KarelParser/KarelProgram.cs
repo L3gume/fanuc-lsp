@@ -1,0 +1,99 @@
+﻿using KarelParser.SymbolTable;
+using Sprache;
+
+using ParserUtils;
+
+namespace KarelParser;
+
+public sealed record KarelProgram(
+    string Name,
+    List<KarelTranslatorDirective> TranslatorDirectives,
+    List<KarelDeclaration> Declarations,
+    List<KarelRoutine> Routines,
+    List<KarelStatement> Statements
+) : WithPosition, IKarelParser<KarelProgram>
+{
+    public KarelSymbolTable SymTable { get; init; } = new();
+
+    public Uri? Uri { get; init; }
+    public string LocalPath { get; init; } = string.Empty;
+    public string HeaderComment { get; init; } = string.Empty;
+
+    private static readonly Parser<KarelProgram> InternalParser =
+        from name in KarelCommon
+            .Keyword("PROGRAM")
+            .Then(_ => KarelCommon.Identifier)
+            .IgnoreComments()
+        from translatorDirectives in KarelTranslatorDirective.GetParser().IgnoreComments().XMany()
+        from declarations in KarelDeclaration.GetParser().IgnoreComments().XMany()
+        from translatorDirectives2 in KarelTranslatorDirective.GetParser().IgnoreComments().XMany()
+        from routines in KarelRoutine.GetParser().IgnoreComments().XMany()
+        from translatorDirectives3 in KarelTranslatorDirective.GetParser().IgnoreComments().XMany()
+        from begin in KarelCommon.Keyword("BEGIN").IgnoreComments()
+        from statements in KarelCommon.ParseStatements(["END"]).WithErrorContext("BEGIN")
+        from endName in KarelCommon
+            .Keyword("END")
+            .Then(_ => KarelCommon.Identifier)
+            .IgnoreComments()
+        select new KarelProgram(
+            name,
+            translatorDirectives.Concat(translatorDirectives2).Concat(translatorDirectives3).ToList(),
+            declarations.ToList(),
+            routines.ToList(),
+            statements.ToList()
+        );
+
+    private static string ExpandIncludeDirectives(string[] lines, string directory)
+        => string.Join("\n", lines.Select(ln => ln.Trim().Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries) switch
+        {
+            // The file is the token right after %INCLUDE; any following tokens are
+            // a trailing comment (e.g. "%INCLUDE KLEVKEYS -- needed for KY_ENTER"),
+            // which we drop so the rewritten path stays a well-formed absolute URI.
+            ["%INCLUDE" or "%include", var file, ..] => $"%INCLUDE {Path.Join(directory, file)}.kl",
+            _ => ln
+        }));
+
+    public static Parser<KarelProgram> GetParser() => InternalParser.WithPos();
+
+    public static IResult<KarelProgram> ProcessAndParse(string uriStr)
+    {
+        var uri = new Uri(uriStr);
+        var path = uri.LocalPath;
+        if (Path.GetDirectoryName(path) is not {} directory)
+        {
+            return Result.Failure<KarelProgram>(null, $"Could not extract directory from {path}", []);
+        }
+
+        var input = File.ReadAllText(path);
+        // Keep each line's original indentation intact: the parser threads
+        // line/column through to every AST node, so trimming here would shift
+        // every declaration and reference to column 0 relative to the real file.
+        // Keep each line's original indentation intact: the parser threads
+        // line/column through to every AST node, so trimming here would shift
+        // every declaration and reference to column 0 relative to the real file.
+        var lines = input.Split(new[] {"\r\n", "\r", "\n"}, StringSplitOptions.None).ToArray();
+        var headerCommentLines = lines
+            .Select(line => line.Trim())
+            .Where(line => !line.StartsWith("%") && !line.StartsWith("PROGRAM"))
+            .TakeWhile(line => line.StartsWith("--") || string.IsNullOrWhiteSpace(line))
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+
+        return GetParser().WithErrorContext("PROGRAM").TryParse(ExpandIncludeDirectives(lines, directory)) switch
+        {
+            { WasSuccessful: true } result => Result.Success(
+                result.Value with
+                {
+                    Uri = uri,
+                    LocalPath = path,
+                    HeaderComment = headerCommentLines.Any()
+                        ? string.Join("\n", headerCommentLines)
+                        : string.Empty,
+                    SymTable = KarelSymbolTableBuilder.Build(result.Value with { Uri = uri })
+                },
+                result.Remainder
+            ),
+            { WasSuccessful: false } result => result,
+        };
+    }
+}

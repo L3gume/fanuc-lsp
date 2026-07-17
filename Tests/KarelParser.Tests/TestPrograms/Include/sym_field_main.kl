@@ -1,0 +1,7 @@
+PROGRAM sym_field_main
+%INCLUDE sym_field_types
+VAR
+p : pose
+BEGIN
+p.x = 1.0
+END sym_field_main

@@ -1,0 +1,7 @@
+# Normalize line endings so core.autocrlf differences never surface as spurious
+# diffs or ^M markers. Text files are stored with LF in git and checked out with
+# CRLF in the working tree (this repo's convention).
+* text=auto eol=crlf
+
+# Karel programs and test fixtures use LF (matches the TestPrograms corpus).
+*.kl text eol=lf
