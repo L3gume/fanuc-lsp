@@ -1,4 +1,4 @@
-# fanuctp-lsp
+# fanuc-lsp
 
-Language Server Protocol Implementation for the Fanuc TP language
+Language Server Protocol Implementation for the Fanuc TPP and Karel languages
 
