@@ -10,7 +10,7 @@
 *.userosscache
 *.sln.docstates
 docs/
-CLAUDE.md/
+CLAUDE.md
 .claude/
 .superpowers/
 
