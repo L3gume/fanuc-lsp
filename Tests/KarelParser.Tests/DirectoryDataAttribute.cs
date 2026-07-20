@@ -1,13 +1,17 @@
 ﻿using System.Reflection;
+using System.Runtime.CompilerServices;
 using Xunit.Sdk;
 
 namespace KarelParser.Tests;
-internal class DirectoryDataAttribute(string directory) : DataAttribute
+internal class DirectoryDataAttribute(string directory, [CallerFilePath] string callerFilePath = "") : DataAttribute
 {
 
     public override IEnumerable<object[]> GetData(MethodInfo testMethod)
     {
-        var expanded = Environment.ExpandEnvironmentVariables(directory);
+        // Anchor the directory to the source file this attribute is applied in,
+        // so it resolves regardless of the working directory the tests run from.
+        var baseDir = Path.GetDirectoryName(callerFilePath) ?? Directory.GetCurrentDirectory();
+        var expanded = Path.GetFullPath(Path.Combine(baseDir, Environment.ExpandEnvironmentVariables(directory)));
         if (!Directory.Exists(expanded))
         {
             Console.Error.WriteLine($"Directory not found: {expanded}");

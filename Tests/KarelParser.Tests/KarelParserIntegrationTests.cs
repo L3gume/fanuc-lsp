@@ -5,7 +5,7 @@ namespace KarelParser.Tests;
 public class KarelParserIntegrationTests
 {
     [Theory]
-    [DirectoryData(@"%UserProfile%\Projects\fanuc-lsp\Tests\KarelParser.Tests\TestPrograms")]
+    [DirectoryData("TestPrograms")]
     public void Parse_AllValidPrograms_ShouldSucceed(string filePath)
     {
         var buffer = File.ReadAllText(filePath, Encoding.ASCII);
