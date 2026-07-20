@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using KarelParser.SymbolTable;
 using ParserUtils;
 using Sprache;
@@ -10,6 +11,16 @@ public class KarelSymbolTableTests
 
     private static KarelSymbolTable Table()
         => new() { ProgramUri = Uri, ScopeStart = new(0, 0), ScopeEnd = new(100, 0) };
+
+    // Anchor test program paths to this source file so they resolve regardless of
+    // the working directory the tests run from (TestPrograms isn't copied to the
+    // test output directory). Same approach as DirectoryDataAttribute.
+    private static string TestProgramUri(string relativePath, [CallerFilePath] string callerFilePath = "")
+    {
+        var baseDir = Path.GetDirectoryName(callerFilePath)!;
+        var fullPath = Path.GetFullPath(Path.Combine(baseDir, "TestPrograms", relativePath));
+        return new Uri(fullPath, UriKind.Absolute).ToString();
+    }
 
     [Fact]
     public void FieldStore_AddAndGetByName()
@@ -197,13 +208,8 @@ public class KarelSymbolTableTests
     [Fact]
     public void Build_FieldFromIncludedStructType_IsRecorded()
     {
-        // TestPrograms isn't copied to the test output directory (see
-        // KarelParserIntegrationTests, which reads from this same absolute path),
-        // so a path relative to the test assembly's working directory won't resolve.
-        var mainPath = Environment.ExpandEnvironmentVariables(
-            @"%UserProfile%\Projects\fanuc-lsp\Tests\KarelParser.Tests\TestPrograms\Include\sym_field_main.kl");
-        var mainUri = new Uri(mainPath, UriKind.Absolute);
-        var result = KarelProgram.ProcessAndParse(mainUri.ToString());
+        var mainUriString = TestProgramUri(@"Include\sym_field_main.kl");
+        var result = KarelProgram.ProcessAndParse(mainUriString);
         Assert.True(result.WasSuccessful, result.Message);
 
         var table = result.Value.SymTable;
@@ -213,10 +219,9 @@ public class KarelSymbolTableTests
     [Fact]
     public void GetFieldSymbolAt_DoesNotMatchAcrossDocumentUris()
     {
-        var mainPath = Environment.ExpandEnvironmentVariables(
-            @"%UserProfile%\Projects\fanuc-lsp\Tests\KarelParser.Tests\TestPrograms\Include\sym_field_main.kl");
-        var mainUri = new Uri(mainPath, UriKind.Absolute);
-        var result = KarelProgram.ProcessAndParse(mainUri.ToString());
+        var mainUriString = TestProgramUri(@"Include\sym_field_main.kl");
+        var mainUri = new Uri(mainUriString, UriKind.Absolute);
+        var result = KarelProgram.ProcessAndParse(mainUriString);
         Assert.True(result.WasSuccessful, result.Message);
 
         var table = result.Value.SymTable;
