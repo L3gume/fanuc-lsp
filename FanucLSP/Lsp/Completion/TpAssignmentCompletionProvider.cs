@@ -5,9 +5,9 @@ using Sprache;
 
 namespace FanucLsp.Lsp.Completion;
 
-internal class TpAssignmentCompletionProvider : ICompletionProvider
+internal class TpAssignmentCompletionProvider : ITpCompletionProvider
 {
-    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int column, LspServerState serverState)
+    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int line, int column, LspServerState serverState)
         => CompletionProviderUtils.TokenizeInput(lineText[..column]) switch
         {
             [string lhs, "="] => TpValue.GetParser().TryParse(lhs) switch

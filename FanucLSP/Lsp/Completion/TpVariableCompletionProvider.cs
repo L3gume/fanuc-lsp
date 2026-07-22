@@ -7,7 +7,7 @@ using FanucLsp.Lsp.State;
 
 namespace FanucLsp.Lsp.Completion;
 
-internal sealed partial class TpVariableCompletionProvider : ICompletionProvider
+internal sealed partial class TpVariableCompletionProvider : ITpCompletionProvider
 {
 
     [GeneratedRegex(@"\$\[[^\]]*")]
@@ -16,7 +16,7 @@ internal sealed partial class TpVariableCompletionProvider : ICompletionProvider
     [GeneratedRegex(@"\$\[([a-zA-Z_]+)\]([a-zA-Z_]*(\[[1-9]+\])?\.)*")]
     private static partial Regex Variable();
 
-    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int column, LspServerState serverState)
+    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int line, int column, LspServerState serverState)
         => CompletionProviderUtils.TokenizeInput(lineText[..column]) switch
         {
             [.., { } variable] when variable.Contains('$') => CompleteVariable(variable[variable.IndexOf('$')..], serverState),

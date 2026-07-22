@@ -36,7 +36,7 @@ public sealed class LspServerState(string logFilePath)
     public ConcurrentDictionary<string, TextDocumentState> OpenedTextDocuments { get; set; } = new();
     public ConcurrentDictionary<string, TextDocumentState> AllTextDocuments { get; set; } = new();
 
-    private static readonly List<ICompletionProvider> TpCompletionProviders =
+    private static readonly List<ITpCompletionProvider> TpCompletionProviders =
     [
         new TpLabelCompletionProvider(),
         new TpMotionInstructionCompletionProvider(),
@@ -48,6 +48,7 @@ public sealed class LspServerState(string logFilePath)
     private static readonly List<IKlCompletionProvider> KlCompletionProviders =
     [
         new KlBuiltinCompletionProvider(),
+        new KlSymbolCompletionProvider(),
     ];
 
     private static readonly List<ITpDefinitionProvider> TpDefinitionProviders =
@@ -203,8 +204,8 @@ public sealed class LspServerState(string logFilePath)
 
         return documentState.Program switch
         {
-            TppProgram tpp => GetTpCompletionItems(tpp.Program, currentLine, character),
-            KlProgram kl => GetKlCompletionItems(kl.Program, currentLine, character),
+            TppProgram tpp => GetTpCompletionItems(tpp.Program, currentLine, lastEdit.Line, character),
+            KlProgram kl => GetKlCompletionItems(kl.Program, currentLine, lastEdit.Line, character),
             _ => [],
         };
     }
@@ -212,6 +213,7 @@ public sealed class LspServerState(string logFilePath)
     private CompletionItem[] GetTpCompletionItems(
         TpProgram program,
         string currentLine,
+        int line,
         int character
     ) =>
         TpCompletionProviders.Aggregate(
@@ -219,7 +221,7 @@ public sealed class LspServerState(string logFilePath)
             (accumulator, completionProvider) =>
                 accumulator
                     .Concat(
-                        completionProvider.GetCompletions(program, currentLine, character, this)
+                        completionProvider.GetCompletions(program, currentLine, line, character, this)
                     )
                     .ToArray()
         );
@@ -227,6 +229,7 @@ public sealed class LspServerState(string logFilePath)
     private CompletionItem[] GetKlCompletionItems(
         KarelProgram program,
         string currentLine,
+        int line,
         int character
     ) =>
         KlCompletionProviders.Aggregate(
@@ -234,7 +237,7 @@ public sealed class LspServerState(string logFilePath)
             (accumulator, completionProvider) =>
                 accumulator
                     .Concat(
-                        completionProvider.GetCompletions(program, currentLine, character, this)
+                        completionProvider.GetCompletions(program, currentLine, line, character, this)
                     )
                     .ToArray()
         );

@@ -4,7 +4,7 @@ using TPLangParser.TPLang.Instructions;
 
 namespace FanucLsp.Lsp.Completion;
 
-public class TpMotionInstructionCompletionProvider : ICompletionProvider
+public class TpMotionInstructionCompletionProvider : ITpCompletionProvider
 {
     private static readonly string[] MotionTypes = ["J", "L", "C", "A", "S"];
     private static readonly string[] SpeedUnits = ["%", "sec", "inch/min", "deg/sec", "mm/sec", "cm/min", "WELD_SPEED"];
@@ -17,7 +17,7 @@ public class TpMotionInstructionCompletionProvider : ICompletionProvider
     ];
 
     // Main completion method
-    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int column, LspServerState serverState)
+    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int line, int column, LspServerState serverState)
     {
         var prefix = lineText[..column];
         var tokens = CompletionProviderUtils.TokenizeInput(prefix);

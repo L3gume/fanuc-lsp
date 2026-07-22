@@ -4,9 +4,9 @@ using TPLangParser.TPLang.Instructions;
 
 namespace FanucLsp.Lsp.Completion;
 
-public class TpLabelCompletionProvider : ICompletionProvider
+public class TpLabelCompletionProvider : ITpCompletionProvider
 {
-    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int column, LspServerState serverState)
+    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int line, int column, LspServerState serverState)
     {
         var tokens = CompletionProviderUtils.TokenizeInput(lineText[..column]);
 

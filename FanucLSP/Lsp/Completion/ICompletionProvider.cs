@@ -6,14 +6,14 @@ using TPLangParser.TPLang;
 
 namespace FanucLsp.Lsp.Completion;
 
-internal interface ICompletionProvider
+internal interface ITpCompletionProvider
 {
-    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int column, LspServerState serverState);
+    public CompletionItem[] GetCompletions(TpProgram program, string lineText, int line, int column, LspServerState serverState);
 }
 
 internal interface IKlCompletionProvider
 {
-    public CompletionItem[] GetCompletions(KarelProgram program, string lineText, int column, LspServerState serverState);
+    public CompletionItem[] GetCompletions(KarelProgram program, string lineText, int line, int column, LspServerState serverState);
 }
 
 public class CodeSnippet
@@ -52,6 +52,43 @@ internal class CompletionProviderUtils
         }
 
         return tokens;
+    }
+
+    // The innermost variable-access chain ending at the cursor: the identifier,
+    // field ('.') and array ('[]') accessors that make up the token being
+    // completed. Scanning stops at any separator (whitespace, operator, '(', ',')
+    // and — crucially — at an unmatched '[', so that when the cursor sits inside an
+    // array subscript the chain is the index expression being typed, not the array
+    // access enclosing it. Balanced "[...]" subscripts stay part of the chain.
+    public static string GetInnermostAccessChain(string textToCursor)
+    {
+        var depth = 0;
+        var start = textToCursor.Length;
+        for (var i = textToCursor.Length - 1; i >= 0; --i)
+        {
+            var c = textToCursor[i];
+            switch (c)
+            {
+                case ']':
+                    ++depth;
+                    start = i;
+                    break;
+                case '[' when depth > 0:
+                    --depth;
+                    start = i;
+                    break;
+                case '.' or '_':
+                    start = i;
+                    break;
+                case var letter when char.IsLetterOrDigit(letter):
+                    start = i;
+                    break;
+                // A separator, or an unmatched '[' opening an enclosing subscript.
+                default:
+                    return textToCursor[start..];
+            }
+        }
+        return textToCursor[start..];
     }
 
     public static string RemoveLineNumber(string input)

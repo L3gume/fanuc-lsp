@@ -161,6 +161,30 @@ public class KarelSymbolTable
     public IEnumerable<KarelSymbol> GetAllSymbols()
         => LockedRead(() => _symbols.Values);
 
+    // Every symbol visible at a position: those declared in the innermost scope
+    // enclosing the position plus every ancestor scope, with inner declarations
+    // shadowing outer ones of the same name. This is what a completion request
+    // needs — a routine's locals and parameters alongside the program globals.
+    public IEnumerable<KarelSymbol> GetVisibleSymbols(TokenPosition position)
+    {
+        var visible = new Dictionary<string, KarelSymbol>();
+        CollectVisibleSymbols(position, visible);
+        return visible.Values;
+    }
+
+    private void CollectVisibleSymbols(TokenPosition position, Dictionary<string, KarelSymbol> visible)
+    {
+        // Outer scope first, so nested (more local) declarations overwrite them.
+        foreach (var (name, symbol) in LockedRead(() => _symbols.ToList()))
+        {
+            visible[name] = symbol;
+        }
+        foreach (var child in Routines.Where(child => child.IsPositionInScope(position)))
+        {
+            child.CollectVisibleSymbols(position, visible);
+        }
+    }
+
     // The symbol addressed by a base-rooted access path written in Karel syntax
     // ("var", "var.field", "var.a.b[2].c"). The base identifier resolves to a
     // top-level variable; each field segment resolves through the type resolver to
@@ -188,6 +212,43 @@ public class KarelSymbolTable
                 : null,
             _ => null
         };
+
+    // Position-aware ResolveAccessSymbol: the base identifier and field-owner base
+    // type are resolved from the scope enclosing the position, so a routine's
+    // locals and parameters resolve as well as program-global data (globals stay
+    // reachable because scope lookup walks up to the root). This is the entry point
+    // completion uses to find the struct behind "someVar." at the cursor.
+    public KarelSymbol? ResolveAccessSymbol(string accessPath, TokenPosition position)
+        => string.IsNullOrWhiteSpace(accessPath)
+            ? null
+            : KarelVariableAccess.GetParser().TryParse(accessPath) switch
+            {
+                { WasSuccessful: true } parsed => ScopeAt(position).ResolveScopedAccessSymbol(parsed.Value),
+                _ => null
+            };
+
+    private KarelSymbol? ResolveScopedAccessSymbol(KarelVariableAccess access)
+        => access switch
+        {
+            KarelIdentifier id => FindVisibleSymbol(id.Identifier),
+            KarelArrayAccess aa => ResolveScopedAccessSymbol(aa.Variable),
+            KarelPathAccess pa => ResolveScopedAccessSymbol(pa.Variable),
+            KarelFieldAccess fa => Resolver?.ResolveFieldOwner(fa, ResolveVariableType) is { } owner
+                ? GetFieldSymbol(owner.OwningType, owner.Field)
+                : null,
+            _ => null
+        };
+
+    // The innermost scope table whose range contains the position — this table when
+    // no nested routine scope does.
+    private KarelSymbolTable ScopeAt(TokenPosition position)
+        => Routines.FirstOrDefault(child => child.IsPositionInScope(position)) is { } scope
+            ? scope.ScopeAt(position)
+            : this;
+
+    // A symbol reachable by name from this scope, searching this scope then ancestors.
+    private KarelSymbol? FindVisibleSymbol(string name)
+        => LockedRead(() => _symbols.GetValueOrDefault(name.ToLower())) ?? Parent?.FindVisibleSymbol(name);
 
     // Variable-rooted dotted paths (no program name) that reach the given struct
     // field through every top-level variable in this scope — e.g. for a field
